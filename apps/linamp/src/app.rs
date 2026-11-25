@@ -44,6 +44,7 @@ struct SkinWindow {
     /// Logical (1x) size.
     size: (i32, i32),
     visible: bool,
+    follows_main: bool,
     focused: bool,
     /// Cursor in physical window coordinates.
     cursor: (i32, i32),
@@ -243,6 +244,7 @@ impl App {
                 pos,
                 size: (w, h),
                 visible: false,
+                follows_main: false,
                 focused: false,
                 cursor: (0, 0),
                 frame: Bitmap::new(w, h, 0),
@@ -252,13 +254,13 @@ impl App {
         }
         self.apply_layout();
         if self.start_minimized {
-            self.minimize();
+            self.set_minimized(true);
         }
     }
 
-    fn minimize(&self) {
-        if let Some(main) = self.win(WinKind::Main) {
-            main.window.set_minimized(true);
+    fn set_minimized(&self, minimized: bool) {
+        for window in self.wins.iter().flatten().filter(|w| w.visible && !w.follows_main) {
+            window.window.set_minimized(minimized);
         }
     }
 
@@ -317,9 +319,11 @@ impl App {
                 w.size = (lw, lh);
                 if w.visible != visible {
                     if visible && k != WinKind::Main {
+                        w.follows_main = false;
                         if let (Some(conn), Some(main), Some(panel)) = (&self.x11, owner, x11_window_id(&w.window)) {
-                            if let Err(e) = set_panel_hints(conn, main, panel) {
-                                log::warn!("cannot group Linamp panel with the main window: {e}");
+                            match set_panel_hints(conn, main, panel) {
+                                Ok(()) => w.follows_main = true,
+                                Err(e) => log::warn!("cannot group Linamp panel with the main window: {e}"),
                             }
                         }
                     }
@@ -941,10 +945,10 @@ impl App {
                     self.apply_layout();
                     self.redraw_all();
                 }
-                UiReq::Minimize => self.minimize(),
+                UiReq::Minimize => self.set_minimized(true),
                 UiReq::Raise => {
+                    self.set_minimized(false);
                     if let Some(w) = self.win(WinKind::Main) {
-                        w.window.set_minimized(false);
                         w.window.focus_window();
                     }
                 }
